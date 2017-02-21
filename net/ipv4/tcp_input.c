@@ -88,7 +88,7 @@ int sysctl_tcp_adv_win_scale __read_mostly = 1;
 EXPORT_SYMBOL(sysctl_tcp_adv_win_scale);
 
 /* rfc5961 challenge ack rate limiting */
-int sysctl_tcp_challenge_ack_limit = 1000;
+int sysctl_tcp_challenge_ack_limit = 100;
 
 int sysctl_tcp_stdurg __read_mostly;
 int sysctl_tcp_rfc1337 __read_mostly;
@@ -99,6 +99,7 @@ int sysctl_tcp_thin_dupack __read_mostly;
 
 int sysctl_tcp_moderate_rcvbuf __read_mostly = 1;
 int sysctl_tcp_early_retrans __read_mostly = 3;
+int sysctl_tcp_default_init_rwnd __read_mostly = TCP_INIT_CWND * 2;
 
 #define FLAG_DATA		0x01 /* Incoming frame contained data.		*/
 #define FLAG_WIN_UPDATE		0x02 /* Incoming ACK was a window update.	*/
@@ -2008,7 +2009,7 @@ static bool tcp_check_sack_reneging(struct sock *sk, int flag)
 					  msecs_to_jiffies(10));
 
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-					  delay, TCP_RTO_MAX);
+					  delay, sysctl_tcp_rto_max);
 		return true;
 	}
 	return false;
@@ -2059,7 +2060,7 @@ static bool tcp_pause_early_retransmit(struct sock *sk, int flag)
 		return false;
 
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_EARLY_RETRANS, delay,
-				  TCP_RTO_MAX);
+				  sysctl_tcp_rto_max);
 	return true;
 }
 
@@ -2989,7 +2990,7 @@ void tcp_rearm_rto(struct sock *sk)
 				rto = delta;
 		}
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, rto,
-					  TCP_RTO_MAX);
+					  sysctl_tcp_rto_max);
 	}
 }
 
@@ -3235,10 +3236,10 @@ static void tcp_ack_probe(struct sock *sk)
 		 * This function is not for random using!
 		 */
 	} else {
-		unsigned long when = inet_csk_rto_backoff(icsk, TCP_RTO_MAX);
+		unsigned long when = inet_csk_rto_backoff(icsk, sysctl_tcp_rto_max);
 
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_PROBE0,
-					  when, TCP_RTO_MAX);
+					  when, sysctl_tcp_rto_max);
 	}
 }
 
@@ -3324,18 +3325,13 @@ static void tcp_send_challenge_ack(struct sock *sk)
 	/* unprotected vars, we dont care of overwrites */
 	static u32 challenge_timestamp;
 	static unsigned int challenge_count;
-	u32 count, now = jiffies / HZ;
+	u32 now = jiffies / HZ;
 
 	if (now != challenge_timestamp) {
-		u32 half = (sysctl_tcp_challenge_ack_limit + 1) >> 1;
-
 		challenge_timestamp = now;
-		WRITE_ONCE(challenge_count, half +
-			   prandom_u32_max(sysctl_tcp_challenge_ack_limit));
+		challenge_count = 0;
 	}
-	count = READ_ONCE(challenge_count);
-	if (count > 0) {
-		WRITE_ONCE(challenge_count, count - 1);
+	if (++challenge_count <= sysctl_tcp_challenge_ack_limit) {
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPCHALLENGEACK);
 		tcp_send_ack(sk);
 	}
@@ -4361,34 +4357,19 @@ static int __must_check tcp_queue_rcv(struct sock *sk, struct sk_buff *skb, int 
 int tcp_send_rcvq(struct sock *sk, struct msghdr *msg, size_t size)
 {
 	struct sk_buff *skb;
-	int err = -ENOMEM;
-	int data_len = 0;
 	bool fragstolen;
 
 	if (size == 0)
 		return 0;
 
-	if (size > PAGE_SIZE) {
-		int npages = min_t(size_t, size >> PAGE_SHIFT, MAX_SKB_FRAGS);
-
-		data_len = npages << PAGE_SHIFT;
-		size = data_len + (size & ~PAGE_MASK);
-	}
-	skb = alloc_skb_with_frags(size - data_len, data_len,
-				   PAGE_ALLOC_COSTLY_ORDER,
-				   &err, sk->sk_allocation);
+	skb = alloc_skb(size, sk->sk_allocation);
 	if (!skb)
 		goto err;
-
-	skb_put(skb, size - data_len);
-	skb->data_len = data_len;
-	skb->len = size;
 
 	if (tcp_try_rmem_schedule(sk, skb, skb->truesize))
 		goto err_free;
 
-	err = skb_copy_datagram_iovec(skb, 0, msg->msg_iov, size);
-	if (err)
+	if (memcpy_fromiovec(skb_put(skb, size), msg->msg_iov, size))
 		goto err_free;
 
 	TCP_SKB_CB(skb)->seq = tcp_sk(sk)->rcv_nxt;
@@ -4404,8 +4385,7 @@ int tcp_send_rcvq(struct sock *sk, struct msghdr *msg, size_t size)
 err_free:
 	kfree_skb(skb);
 err:
-	return err;
-
+	return -ENOMEM;
 }
 
 static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
@@ -5500,7 +5480,7 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 			icsk->icsk_ack.lrcvtime = tcp_time_stamp;
 			tcp_enter_quickack_mode(sk);
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
-						  TCP_DELACK_MAX, TCP_RTO_MAX);
+						  TCP_DELACK_MAX, sysctl_tcp_rto_max);
 
 discard:
 			__kfree_skb(skb);
@@ -5545,7 +5525,6 @@ discard:
 		}
 
 		tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
-		tp->copied_seq = tp->rcv_nxt;
 		tp->rcv_wup = TCP_SKB_CB(skb)->seq + 1;
 
 		/* RFC1323: The window in SYN & SYN/ACK segments is

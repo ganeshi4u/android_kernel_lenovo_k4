@@ -3651,8 +3651,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 					sector if the number is odd);
 				i = IGNORE_DEVICE (don't bind to this
 					device);
-				j = NO_REPORT_LUNS (don't use report luns
-					command, uas only);
 				l = NOT_LOCKABLE (don't try to lock and
 					unlock ejectable media);
 				m = MAX_SECTORS_64 (don't transfer more
@@ -3690,6 +3688,9 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 				nohigh = do not allocate PTE pages in
 					HIGHMEM regardless of setting
 					of CONFIG_HIGHPTE.
+
+	uuid_debug=	(Boolean) whether to enable debugging of TuxOnIce's
+			uuid support.
 
 	vdso=		[X86,SH]
 			On X86_32, this is an alias for vdso32=.  Otherwise:

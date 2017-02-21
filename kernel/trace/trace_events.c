@@ -8,6 +8,7 @@
  *
  */
 
+#define DEBUG 1
 #define pr_fmt(fmt) fmt
 
 #include <linux/workqueue.h>
@@ -23,6 +24,8 @@
 #include <asm/setup.h>
 
 #include "trace_output.h"
+
+#include "mtk_ftrace.h"
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM "TRACE_SYSTEM"
@@ -286,6 +289,9 @@ static int __ftrace_event_enable_disable(struct ftrace_event_file *file,
 	struct ftrace_event_call *call = file->event_call;
 	int ret = 0;
 	int disable;
+
+	if (call->name && ((file->flags & FTRACE_EVENT_FL_ENABLED) ^ enable))
+		pr_debug("[ftrace]event '%s' is %s\n", call->name, enable ? "enabled" : "disabled");
 
 	switch (enable) {
 	case 0:
@@ -618,12 +624,12 @@ ftrace_event_write(struct file *file, const char __user *ubuf,
 
 		ret = ftrace_set_clr_event(tr, parser.buffer + !set, set);
 		if (ret)
-			goto out_put;
+			pr_debug("[ftrace]fail to %s event '%s'\n", set ? "enable" : "disable", parser.buffer + !set);
+		/* continue to handle rest user's input instead of going out directly */
 	}
 
 	ret = read;
 
- out_put:
 	trace_parser_put(&parser);
 
 	return ret;
@@ -644,8 +650,7 @@ t_next(struct seq_file *m, void *v, loff_t *pos)
 		 * The ftrace subsystem is for showing formats only.
 		 * They can not be enabled or disabled via the event files.
 		 */
-		if (call->class && call->class->reg &&
-		    !(call->flags & TRACE_EVENT_FL_IGNORE_ENABLE))
+		if (call->class && call->class->reg)
 			return file;
 	}
 
@@ -1584,13 +1589,8 @@ event_create_dir(struct dentry *parent, struct ftrace_event_file *file)
 	trace_create_file("filter", 0644, file->dir, file,
 			  &ftrace_event_filter_fops);
 
-	/*
-	 * Only event directories that can be enabled should have
-	 * triggers.
-	 */
-	if (!(call->flags & TRACE_EVENT_FL_IGNORE_ENABLE))
-		trace_create_file("trigger", 0644, file->dir, file,
-				  &event_trigger_fops);
+	trace_create_file("trigger", 0644, file->dir, file,
+			  &event_trigger_fops);
 
 	trace_create_file("format", 0444, file->dir, call,
 			  &ftrace_event_format_fops);

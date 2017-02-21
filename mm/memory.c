@@ -69,6 +69,10 @@
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
 
+#ifdef CONFIG_MTK_EXTMEM
+#include <linux/exm_driver.h>
+#endif
+
 #include "internal.h"
 
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
@@ -1741,11 +1745,18 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 	 * un-COW'ed pages by matching them up with "vma->vm_pgoff".
 	 * See vm_normal_page() for details.
 	 */
+#ifdef CONFIG_MTK_EXTMEM
+	if (addr == vma->vm_start && end == vma->vm_end)
+		vma->vm_pgoff = pfn;
+	else if (is_cow_mapping(vma->vm_flags))
+		return -EINVAL;
+#else
 	if (is_cow_mapping(vma->vm_flags)) {
 		if (addr != vma->vm_start || end != vma->vm_end)
 			return -EINVAL;
 		vma->vm_pgoff = pfn;
 	}
+#endif
 
 	err = track_pfn_remap(vma, &prot, pfn, addr, PAGE_ALIGN(size));
 	if (err)
@@ -3316,18 +3327,8 @@ static int __handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (unlikely(pmd_none(*pmd)) &&
 	    unlikely(__pte_alloc(mm, vma, pmd, address)))
 		return VM_FAULT_OOM;
-	/*
-	 * If a huge pmd materialized under us just retry later.  Use
-	 * pmd_trans_unstable() instead of pmd_trans_huge() to ensure the pmd
-	 * didn't become pmd_trans_huge under us and then back to pmd_none, as
-	 * a result of MADV_DONTNEED running immediately after a huge pmd fault
-	 * in a different thread of this mm, in turn leading to a misleading
-	 * pmd_trans_huge() retval.  All we have to ensure is that it is a
-	 * regular pmd that we can walk with pte_offset_map() and we can do that
-	 * through an atomic read in C, which is what pmd_trans_unstable()
-	 * provides.
-	 */
-	if (unlikely(pmd_trans_unstable(pmd)))
+	/* if an huge pmd materialized from under us just retry later */
+	if (unlikely(pmd_trans_huge(*pmd)))
 		return 0;
 	/*
 	 * A regular pmd is established and it can't morph into a huge pmd
@@ -3586,6 +3587,24 @@ static int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
 		ret = get_user_pages(tsk, mm, addr, 1,
 				write, 1, &page, &vma);
 		if (ret <= 0) {
+#ifdef CONFIG_MTK_EXTMEM
+			if (!write) {
+				vma = find_vma(mm, addr);
+				if (!vma || vma->vm_start > addr)
+					break;
+				if (vma->vm_end < addr + len)
+					len = vma->vm_end - addr;
+				if (extmem_in_mspace(vma)) {
+					unsigned long pa = vma->vm_pgoff << PAGE_SHIFT;
+					void *extmem_va =
+						(void *)(get_virt_from_mspace(pa) + (addr - vma->vm_start));
+
+					memcpy(buf, extmem_va, len);
+					buf += len;
+					break;
+				}
+			}
+#endif
 #ifndef CONFIG_HAVE_IOREMAP_PROT
 			break;
 #else

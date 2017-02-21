@@ -48,7 +48,9 @@
 #include <asm/div64.h>
 #include <asm/timex.h>
 #include <asm/io.h>
-
+#ifdef CONFIG_MTPROF
+#include "mt_sched_mon.h"
+#endif
 #define CREATE_TRACE_POINTS
 #include <trace/events/timer.h>
 
@@ -956,27 +958,13 @@ EXPORT_SYMBOL(add_timer);
  */
 void add_timer_on(struct timer_list *timer, int cpu)
 {
-	struct tvec_base *new_base = per_cpu(tvec_bases, cpu);
-	struct tvec_base *base;
+	struct tvec_base *base = per_cpu(tvec_bases, cpu);
 	unsigned long flags;
 
 	timer_stats_timer_set_start_info(timer);
 	BUG_ON(timer_pending(timer) || !timer->function);
-
-	/*
-	 * If @timer was on a different CPU, it should be migrated with the
-	 * old base locked to prevent other operations proceeding with the
-	 * wrong base locked.  See lock_timer_base().
-	 */
-	base = lock_timer_base(timer, &flags);
-	if (base != new_base) {
-		timer_set_base(timer, NULL);
-		spin_unlock(&base->lock);
-		base = new_base;
-		spin_lock(&base->lock);
-		timer_set_base(timer, base);
-	}
-
+	spin_lock_irqsave(&base->lock, flags);
+	timer_set_base(timer, base);
 	debug_activate(timer, timer->expires);
 	internal_add_timer(base, timer);
 	spin_unlock_irqrestore(&base->lock, flags);
@@ -1152,7 +1140,13 @@ static void call_timer_fn(struct timer_list *timer, void (*fn)(unsigned long),
 	lock_map_acquire(&lockdep_map);
 
 	trace_timer_expire_entry(timer);
+#ifdef CONFIG_MTPROF
+	mt_trace_sft_start(fn);
+#endif
 	fn(data);
+#ifdef CONFIG_MTPROF
+	mt_trace_sft_end(fn);
+#endif
 	trace_timer_expire_exit(timer);
 
 	lock_map_release(&lockdep_map);

@@ -431,7 +431,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 		icsk->icsk_backoff--;
 		icsk->icsk_rto = tp->srtt_us ? __tcp_set_rto(tp) :
 					       TCP_TIMEOUT_INIT;
-		icsk->icsk_rto = inet_csk_rto_backoff(icsk, TCP_RTO_MAX);
+		icsk->icsk_rto = inet_csk_rto_backoff(icsk, sysctl_tcp_rto_max);
 
 		skb = tcp_write_queue_head(sk);
 		BUG_ON(!skb);
@@ -442,7 +442,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 
 		if (remaining) {
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-						  remaining, TCP_RTO_MAX);
+						  remaining, sysctl_tcp_rto_max);
 		} else {
 			/* RTO revert clocked out retransmission.
 			 * Will retransmit now */
@@ -959,8 +959,7 @@ int tcp_md5_do_add(struct sock *sk, const union tcp_md5_addr *addr,
 	}
 
 	md5sig = rcu_dereference_protected(tp->md5sig_info,
-					   sock_owned_by_user(sk) ||
-					   lockdep_is_held(&sk->sk_lock.slock));
+					   sock_owned_by_user(sk));
 	if (!md5sig) {
 		md5sig = kmalloc(sizeof(*md5sig), gfp);
 		if (!md5sig)
@@ -1553,7 +1552,7 @@ bool tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 	if (likely(sk->sk_rx_dst))
 		skb_dst_drop(skb);
 	else
-		skb_dst_force_safe(skb);
+		skb_dst_force(skb);
 
 	__skb_queue_tail(&tp->ucopy.prequeue, skb);
 	tp->ucopy.memory += skb->truesize;
@@ -1575,7 +1574,7 @@ bool tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 		if (!inet_csk_ack_scheduled(sk))
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
 						  (3 * tcp_rto_min(sk)) / 4,
-						  TCP_RTO_MAX);
+						  sysctl_tcp_rto_max);
 	}
 	return true;
 }
@@ -1723,6 +1722,7 @@ do_time_wait:
 		inet_twsk_put(inet_twsk(sk));
 		goto csum_error;
 	}
+
 	switch (tcp_timewait_state_process(inet_twsk(sk), skb, th)) {
 	case TCP_TW_SYN: {
 		struct sock *sk2 = inet_lookup_listener(dev_net(skb->dev),
@@ -1758,7 +1758,8 @@ void inet_sk_rx_dst_set(struct sock *sk, const struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
 
-	if (dst && dst_hold_safe(dst)) {
+	if (dst) {
+		dst_hold(dst);
 		sk->sk_rx_dst = dst;
 		inet_sk(sk)->rx_dst_ifindex = skb->skb_iif;
 	}
@@ -1851,6 +1852,97 @@ void tcp_v4_destroy_sock(struct sock *sk)
 	sock_release_memcg(sk);
 }
 EXPORT_SYMBOL(tcp_v4_destroy_sock);
+
+void tcp_v4_handle_retrans_time_by_uid(struct uid_err uid_e)
+{
+	unsigned int bucket;
+	uid_t skuid = (uid_t)(uid_e.appuid);
+	struct inet_connection_sock *icsk = NULL;
+
+	for (bucket = 0; bucket < tcp_hashinfo.ehash_mask; bucket++) {
+		struct hlist_nulls_node *node;
+		struct sock *sk;
+		spinlock_t *lock = inet_ehash_lockp(&tcp_hashinfo, bucket);
+
+		spin_lock_bh(lock);
+		sk_nulls_for_each(sk, node, &tcp_hashinfo.ehash[bucket].chain) {
+			if (sysctl_ip_dynaddr && sk->sk_state == TCP_SYN_SENT)
+				continue;
+			if (sock_flag(sk, SOCK_DEAD))
+				continue;
+
+			if (sk->sk_socket) {
+				if (SOCK_INODE(sk->sk_socket)->i_uid.val != skuid)
+					continue;
+
+			} else {
+				continue;
+			}
+
+			sock_hold(sk);
+			spin_unlock_bh(lock);
+
+			local_bh_disable();
+			bh_lock_sock(sk);
+
+			icsk = inet_csk(sk);
+			pr_debug("[mmspb] tcp_v4_handle_retrans_time_by_uid update timer\n");
+
+			sk_reset_timer(sk, &icsk->icsk_retransmit_timer, jiffies + 2);
+			bh_unlock_sock(sk);
+			local_bh_enable();
+			spin_lock_bh(lock);
+			sock_put(sk);
+		}
+		spin_unlock_bh(lock);
+	}
+}
+
+/* tcp_v4_nuke_addr_by_uid - destroy all sockets of spcial uid*/
+void tcp_v4_reset_connections_by_uid(struct uid_err uid_e)
+{
+	unsigned int bucket;
+	uid_t skuid = (uid_t)(uid_e.appuid);
+
+	for (bucket = 0; bucket < tcp_hashinfo.ehash_mask; bucket++) {
+		struct hlist_nulls_node *node;
+		struct sock *sk;
+		spinlock_t *lock = inet_ehash_lockp(&tcp_hashinfo, bucket);
+
+restart:
+		spin_lock_bh(lock);
+		sk_nulls_for_each(sk, node, &tcp_hashinfo.ehash[bucket].chain) {
+			if (sysctl_ip_dynaddr && sk->sk_state == TCP_SYN_SENT)
+				continue;
+			if (sock_flag(sk, SOCK_DEAD))
+				continue;
+			if (sk->sk_state == TCP_TIME_WAIT)
+				continue;
+			if (sk->sk_socket) {
+				if (SOCK_INODE(sk->sk_socket)->i_uid.val != skuid)
+					continue;
+			} else {
+				continue;
+			}
+
+			sock_hold(sk);
+			spin_unlock_bh(lock);
+
+			local_bh_disable();
+			bh_lock_sock(sk);
+			sk->sk_err = uid_e.errNum;
+			pr_debug("SIOCKILLSOCK set sk err == %d!!\n", sk->sk_err);
+			sk->sk_error_report(sk);
+
+			tcp_done(sk);
+			bh_unlock_sock(sk);
+			local_bh_enable();
+			sock_put(sk);
+			goto restart;
+		}
+		spin_unlock_bh(lock);
+	}
+}
 
 #ifdef CONFIG_PROC_FS
 /* Proc filesystem TCP sock list dumping. */

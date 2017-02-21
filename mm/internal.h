@@ -133,9 +133,8 @@ __find_buddy_index(unsigned long page_idx, unsigned int order)
 }
 
 extern int __isolate_free_page(struct page *page, unsigned int order);
-extern void __free_pages_bootmem(struct page *page, unsigned long pfn,
-					unsigned int order);
-extern void prep_compound_page(struct page *page, unsigned int order);
+extern void __free_pages_bootmem(struct page *page, unsigned int order);
+extern void prep_compound_page(struct page *page, unsigned long order);
 #ifdef CONFIG_MEMORY_FAILURE
 extern bool is_free_buddy_page(struct page *page);
 #endif
@@ -193,7 +192,7 @@ isolate_migratepages_range(struct compact_control *cc,
  * page cannot be allocated or merged in parallel. Alternatively, it must
  * handle invalid values gracefully, and use page_order_unsafe() below.
  */
-static inline unsigned int page_order(struct page *page)
+static inline unsigned long page_order(struct page *page)
 {
 	/* PageBuddy() must be checked by the caller */
 	return page_private(page);
@@ -374,6 +373,12 @@ static inline void mminit_validate_memmodel_limits(unsigned long *start_pfn,
 {
 }
 #endif /* CONFIG_SPARSEMEM */
+
+#if defined(CONFIG_ANDROID_LOW_MEMORY_KILLER) && defined(CONFIG_MTK_GMO_RAM_OPTIMIZE)
+/* #define LOGTAG "VMSCAN" */
+
+extern int lowmem_minfree[9];
+#endif
 
 #define ZONE_RECLAIM_NOSCAN	-2
 #define ZONE_RECLAIM_FULL	-1

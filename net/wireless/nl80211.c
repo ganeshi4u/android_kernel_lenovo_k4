@@ -6033,7 +6033,7 @@ static int nl80211_channel_switch(struct sk_buff *skb, struct genl_info *info)
 
 		params.n_counter_offsets_presp = len / sizeof(u16);
 		if (rdev->wiphy.max_num_csa_counters &&
-		    (params.n_counter_offsets_presp >
+		    (params.n_counter_offsets_beacon >
 		     rdev->wiphy.max_num_csa_counters))
 			return -EINVAL;
 
@@ -7881,8 +7881,11 @@ static int nl80211_tx_mgmt(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	if (info->attrs[NL80211_ATTR_DURATION]) {
-		if (!(rdev->wiphy.flags & WIPHY_FLAG_OFFCHAN_TX))
-			return -EINVAL;
+		/*  Here comment out the following code: bcz we has let supplicant pass the wait
+		 *  but our driver is still not support WIPHY_FLAG_OFFCHAN_TX
+		 *	if (!(rdev->wiphy.flags & WIPHY_FLAG_OFFCHAN_TX))
+		 *	return -EINVAL;
+		 */
 		params.wait = nla_get_u32(info->attrs[NL80211_ATTR_DURATION]);
 
 		/*
@@ -11951,7 +11954,7 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
 	struct wireless_dev *wdev;
 	struct cfg80211_beacon_registration *reg, *tmp;
 
-	if (state != NETLINK_URELEASE || notify->protocol != NETLINK_GENERIC)
+	if (state != NETLINK_URELEASE)
 		return NOTIFY_DONE;
 
 	rcu_read_lock();

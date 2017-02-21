@@ -1,6 +1,18 @@
 #
 # Makefile for multifunction miscellaneous devices
 #
+MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
+subdir-ccflags-y += -Werror -I$(srctree)/drivers/misc/mediatek/include
+subdir-ccflags-y += -Werror -I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include
+subdir-ccflags-y += -Werror -I$(srctree)/drivers/misc/mediatek/include/mt-plat
+subdir-ccflags-y += -Werror -I$(srctree)/drivers/spi/mediatek/$(MTK_PLATFORM)
+
+ccflags-y += -Werror -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
+ccflags-y += -D_GIT318_READY
+ccflags-y += -D_GIT318_PMIC_READY
+ccflags-y += -D_WCN_SUPPORT
+ccflags-y += -DAUDIO_USING_WRAP_DRIVER
+ccflags-y += -D_MT_IDLE_HEADER
 
 88pm860x-objs			:= 88pm860x-core.o 88pm860x-i2c.o
 obj-$(CONFIG_MFD_88PM860X)	+= 88pm860x.o
@@ -39,14 +51,29 @@ obj-$(CONFIG_MFD_ARIZONA)	+= arizona-core.o
 obj-$(CONFIG_MFD_ARIZONA)	+= arizona-irq.o
 obj-$(CONFIG_MFD_ARIZONA_I2C)	+= arizona-i2c.o
 obj-$(CONFIG_MFD_ARIZONA_SPI)	+= arizona-spi.o
-ifneq ($(CONFIG_MFD_WM5102),n)
+ifeq ($(CONFIG_MFD_WM5102),y)
 obj-$(CONFIG_MFD_ARIZONA)	+= wm5102-tables.o
 endif
-ifneq ($(CONFIG_MFD_WM5110),n)
-obj-$(CONFIG_MFD_ARIZONA)	+= wm5110-tables.o
+ifeq ($(CONFIG_MFD_FLORIDA),y)
+obj-$(CONFIG_MFD_ARIZONA)	+= florida-tables.o
 endif
-ifneq ($(CONFIG_MFD_WM8997),n)
+ifeq ($(CONFIG_MFD_WM8997),y)
 obj-$(CONFIG_MFD_ARIZONA)	+= wm8997-tables.o
+endif
+ifeq ($(CONFIG_MFD_VEGAS),y)
+obj-$(CONFIG_MFD_ARIZONA)	+= vegas-tables.o
+endif
+ifeq ($(CONFIG_MFD_CLEARWATER),y)
+obj-$(CONFIG_MFD_ARIZONA)	+= clearwater-tables.o
+endif
+ifeq ($(CONFIG_MFD_MARLEY),y)
+obj-$(CONFIG_MFD_ARIZONA)	+= marley-tables.o
+endif
+ifeq ($(CONFIG_MFD_LARGO),y)
+obj-$(CONFIG_MFD_ARIZONA)	+= largo-tables.o
+endif
+ifeq ($(CONFIG_MFD_MOON), y)
+obj-$(CONFIG_MFD_ARIZONA)	+= moon-tables.o
 endif
 obj-$(CONFIG_MFD_WM8400)	+= wm8400-core.o
 wm831x-objs			:= wm831x-core.o wm831x-irq.o wm831x-otp.o
@@ -177,3 +204,5 @@ obj-$(CONFIG_MFD_HI6421_PMIC)	+= hi6421-pmic-core.o
 
 intel-soc-pmic-objs		:= intel_soc_pmic_core.o intel_soc_pmic_crc.o
 obj-$(CONFIG_INTEL_SOC_PMIC)	+= intel-soc-pmic.o
+obj-$(CONFIG_MFD_MT6323)	+= mt6323-core.o
+obj-$(CONFIG_MFD_MT6397)	+= mt6397-core.o

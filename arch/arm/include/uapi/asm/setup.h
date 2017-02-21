@@ -143,6 +143,36 @@ struct tag_memclk {
 	__u32 fmemclk;
 };
 
+/*Lenovo-sw quebs2 added 20150510 begin,support efuse check with sbc flag*/
+#define ATAG_SBC_FLAG      0x88610015
+struct tag_sbc_flag {
+    u32 sbc_flag;
+};
+/*Lenovo-sw quebs2 added 20150510 end,support efuse check with sbc flag*/
+
+/* general memory descriptor */
+struct mem_desc {
+	u64 start;
+	u64 size;
+};
+
+/* mblock is used by CPU */
+struct mblock {
+	u64 start;
+	u64 size;
+	u32 rank;	/* rank the mblock belongs to */
+};
+
+struct mblock_info {
+	u32 mblock_num;
+	struct mblock mblock[4];
+};
+
+struct dram_info {
+	u32 rank_num;
+	struct mem_desc rank_info[4];
+};
+
 struct tag {
 	struct tag_header hdr;
 	union {
@@ -156,6 +186,9 @@ struct tag {
 		struct tag_videolfb	videolfb;
 		struct tag_cmdline	cmdline;
 
+		/*Lenovo-sw quebs2 added 20150510 begin,support fuse check with sbc flag*/
+                struct tag_sbc_flag;
+                /*Lenovo-sw quebs2 added 20150510 end,support fuse check with sbc flag*/
 		/*
 		 * Acorn specific
 		 */
