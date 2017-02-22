@@ -96,3 +96,6 @@ x509.genkey
 
 # Kconfig presets
 all.config
+
+!Lenovo_K5_MP_01000011_20151208_app.i
+!Lenovo_K5_MP_02000005_20151208_app.i
