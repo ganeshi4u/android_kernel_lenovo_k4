@@ -1605,29 +1605,8 @@ restart:
 			goto out_unlock;
 	}
 
-	/* other == sk && unix_peer(other) != sk if
-	 * - unix_peer(sk) == NULL, destination address bound to sk
-	 * - unix_peer(sk) == sk by time of get but disconnected before lock
-	 */
-	if (other != sk &&
-	    unlikely(unix_peer(other) != sk && unix_recvq_full(other))) {
-		if (timeo) {
-			timeo = unix_wait_for_peer(other, timeo);
-
-			err = sock_intr_errno(timeo);
-			if (signal_pending(current))
-				goto out_free;
-
-			goto restart;
-		}
-
-		if (!sk_locked) {
-			unix_state_unlock(other);
-			unix_state_double_lock(sk, other);
-		}
-
-		if (unix_peer(sk) != other ||
-		    unix_dgram_peer_wake_me(sk, other)) {
+	if (unix_peer(other) != sk && unix_recvq_full(other)) {
+		if (!timeo) {
 			err = -EAGAIN;
 			goto out_unlock;
 		}
